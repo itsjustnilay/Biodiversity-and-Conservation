@@ -1,0 +1,338 @@
+---
+title: "Species Extinction Project"
+author: "R Squad"
+date: "2024-05-04"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+source("http://www.reuningscherer.net/s&ds230/Rfuncs/regJDRS.txt")
+library(car)
+```
+
+### **1)  Introduction**
+
+National parks serve as sanctuaries for diverse flora and fauna, playing a pivotal role in biodiversity conservation. The National Park Service's database provides a detailed record of species across these protected areas, enabling researchers and conservationists to monitor ecological dynamics and species health. Analyzing this dataset using R not only demonstrates data manipulation and analytical skills but also aids in developing effective conservation strategies by identifying patterns in species distribution, abundance, biological phenotype and conservation status. This project seeks to leverage the rich data provided to enhance our understanding and management of national park biodiversity. 
+
+The data was accessed via Kaggle which can be accessed [here](https://www.kaggle.com/datasets/nationalparkservice/park-biodiversity).
+
+### **2)  Data**
+
+- Park Code, Park Name, Park State: The park's designation and coordinates.
+- The park's size expressed in acres.
+- The park's geographic coordinates are Latitude and Longitude expressed in decimal degrees.
+Name, Classification, Scientific Name, Common Names: Information about the species' taxonomy.
+Conservation Status: The US Fish & Wildlife Service's definition of protection.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stats)
+
+# Load data
+parks <- read.csv("parks.csv")
+species <- read.csv("species.csv")
+
+head(parks)
+dim(parks)
+head(species)
+dim(species)
+```
+
+### **3)  Data Cleaning**
+
+In this project, we have two CSV files, `parks.csv` and `species.csv`, which will be combined to perform comprehensive analyses like species distribution across U.S. National Parks, conservation status analysis, etc. The `parks.csv` file contains basic information about each park. The `species.csv` file details species data for each park. 
+
+By merging these datasets, we can correlate the geographical, biological, and ecological characteristics of parks with species information, enabling a nuanced exploration of biodiversity patterns, and species conservation needs. This combined analysis will help us understand how species interact with their environments and how these interactions vary across different parks.
+
+```{r}
+# Data cleaning
+
+# Rename columns in the dataframes by replacing dots with spaces
+species <- species %>%
+  rename_with(~ gsub("\\.", " ", .x))
+parks <- parks %>%
+  rename_with(~ gsub("\\.", " ", .x))
+
+#Dealing wth conservation status
+species <- species %>%
+  mutate(
+    `Conservation Status` = replace_na(`Conservation Status`, "Not Listed"),
+    `Conservation Status` = if_else(`Conservation Status` == "", "Not Listed", `Conservation Status`),
+    `Conservation Status` = if_else(`Conservation Status` == "Unknown", "Not Listed", `Conservation Status`)
+  ) %>%
+  filter(`Conservation Status` != "Not Listed")  # Keep only known statuses
+
+parks <- parks %>%
+  mutate(
+    Acres = as.numeric(Acres),
+    Latitude = replace_na(Latitude, mean(Latitude, na.rm = TRUE)),
+    Longitude = replace_na(Longitude, mean(Longitude, na.rm = TRUE))
+  )
+
+# Merging species data with park details
+species_with_park <- species %>%
+  left_join(parks, by = "Park Name")
+
+species_with_park <- subset(species_with_park, select = -c(Seasonality, Abundance, `Species ID`, `Park Code`))
+
+species_with_park[species_with_park == ""] <- NA
+species_with_park <- na.omit(species_with_park)
+
+# Check structures
+head(species_with_park)
+dim(species_with_park)
+```
+
+### **4)  Descriptive Plots, summary information** 
+
+```{r}
+# Summary information
+summary(species_with_park)
+```
+
+```{r}
+# Histogram of species by Conservation Status 
+hist(species_with_park$Acres/1000,
+     breaks = 50, # Adjusts the number of bins for better granularity
+     main = "Histogram of Park Acres",
+     xlab = "Thousand Acres",
+     col = "cornflowerblue",
+     border = "white")
+lines(density(species_with_park$Acres/1000), col = "darkblue", lwd = 2)
+
+# boxplot of park acres by species conservation status
+par(las=2)  
+par(mar=c(7, 5, 4, 2) + 0.1)
+par(cex.axis=0.8, font.axis=2)  
+boxplot(Acres/1000 ~ `Conservation Status`, data = species_with_park, 
+        main = "Park Acres by Species Conservation Status",
+        xlab = "Conservation Status",
+        ylab = "Thousand Acres",
+        col = "blue",
+        las = 2)  
+mtext(side = 1, line = 6, "Conservation Status")
+
+library(dplyr)
+
+# Aggregate data by Category and Conservation Status
+category_status_counts <- species_with_park %>%
+  group_by(Category, `Conservation Status`) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Convert the data frame to a table format suitable for barplot
+bar_data <- xtabs(Count ~ Category + `Conservation Status`, data = category_status_counts)
+
+# Counting the number of species in each conservation status
+status_counts <- table(species_with_park$`Conservation Status`)
+
+# Create a bar plot for species counts by conservation status
+barplot(status_counts, 
+        main = "Number of Species by Conservation Status",
+        xlab = "Conservation Status",
+        ylab = "Number of Species",
+        col = "blue", 
+        las = 2)  
+
+# Scatterplot of Acres (divided by 1000) vs. Latitude
+plot(species_with_park$Acres / 1000, species_with_park$Latitude,
+     xlab = "Acres (thousands)",
+     ylab = "Latitude",
+     main = "Park Size vs. Latitude",
+     pch = 20,
+     col = "darkgreen")  
+abline(lm(Latitude ~ I(Acres / 1000), data = species_with_park), col = "red")
+
+
+# QQ Plot
+species_with_park$Thousand_Acres <- species_with_park$Acres / 1000
+qqnorm(species_with_park$Thousand_Acres, main = "Q-Q Plot of Park Acres (in thousands)", ylab = "Observed Quantiles")
+qqline(species_with_park$Thousand_Acres, col = "red", lwd = 2)
+
+```
+
+The visualizations provided offer helpful analyses into park sizes and species conservation statuses. The histogram of park acres indicates that smaller parks predominate, with a rapid decrease in frequency as park size increases, which could mean a possible preference or necessity for managing smaller protected areas. In the boxplot showing park acres by species conservation status, we observe that while park sizes are relatively uniform across different statuses, there are notable outliers suggesting that some very large parks also focus on conservation efforts. The bar plot with the number of species by conservation status clearly shows a disproportionately high number of species categorized as "Species of Concern," underscoring the urgency and focus of conservation efforts on these species. The scatterplot of park size versus latitude suggests a slight trend where larger parks tend to be located at higher latitudes, potentially reflecting geographic and climatic influences on park size and conservation strategies. The Q-Q plot of park acres (in thousands) reveals significant deviations from the theoretical normal distribution, particularly in the upper quantiles where the observed quantiles sharply diverge from the red reference line. This suggests that the distribution of park acres is skewed, likely with a heavy tail, indicating the presence of outliers or a distribution that is not symmetrical. The clustering of many data points at the lower end and the extreme values at the higher end further suggest a positive skewness in the data distribution.
+
+
+### **5)  Analysis**
+
+```{r}
+# Perform t-test
+t_test_result <- t.test(species_with_park$Acres, species_with_park$Latitude)
+t_test_result
+
+# Calculate correlation
+correlation_result <- cor.test(species_with_park$Acres, species_with_park$Latitude)
+correlation_result
+
+# Bootstrap for t-test and correlation
+N <- nrow(species_with_park)
+n_samp <- 10000
+
+t_bootstrap_results <- rep(NA, n_samp)
+cor_bootstrap_results <- rep(NA, n_samp)
+
+for(i in 1:n_samp) {
+  s <- sample(1:N, N, replace = TRUE)
+  fakeData <- species_with_park[s, ]
+  
+  t_bootstrap_results[i] <- t.test(fakeData$Acres, fakeData$Latitude)$statistic
+  cor_bootstrap_results[i] <- cor(fakeData$Acres, fakeData$Latitude)
+}
+
+# Calculate bootstrap confidence intervals
+ci_t <- quantile(t_bootstrap_results, c(0.025, 0.975))
+ci_cor <- quantile(cor_bootstrap_results, c(0.025, 0.975))
+
+# Display results
+cat("Bootstrap CI for t-test:", ci_t, "\n")
+cat("Bootstrap CI for correlation:", ci_cor, "\n")
+
+# Histogram
+hist(cor_bootstrap_results, col = "blue", main = "Bootstrapped Correlation Results", xlab = "Correlation", breaks = 30)
+abline(v = ci_cor, lwd = 3, col = "red")
+abline(v = correlation_result$conf.int, lwd = 3, col = "green", lty = 2)
+legend("topleft", c("Theoretical CI","Boot CI"), lwd = 3, col = c("green","red"), lty = c(2, 1))
+```
+
+Welch Two Sample t-test: The t-test result shows a very significant difference between the mean values of park acres (mean = 760,989.65) and latitude (mean = 38.78), with a t-value of 36.628 and an extremely small p-value (< 2.2e-16). This indicates a highly significant statistical difference in means between the two variables. The 95% confidence interval for the difference in means ranges from 720,221 to 801,680.7, supporting the considerable difference observed.
+
+Pearson's Correlation: The correlation analysis tests whether there is a significant linear relationship between the size of parks (in acres) and their latitude. The correlation coefficient is 0.431, with a 95% confidence interval ranging from 0.407 to 0.455, as determined by the correlation test. This positive correlation suggests that as latitude increases (moving further north), the size of the parks also tends to increase, although the relationship is moderate.
+
+Bootstrapped Confidence Intervals: Bootstrap techniques were used to estimate the confidence intervals for both the t-test statistic and the correlation coefficient, resulting in CIs of 35.665 to 37.678 for the t-test and 0.398 to 0.462 for the correlation. The bootstrapped CI for the correlation is shown on the histogram with a normal distribution of bootstrap correlation results. This graphical representation shows the bootstrap confidence interval (in red) encompassing a wide range of possible correlation values, with the theoretical CI (in green) indicating the interval obtained from the correlation test itself.
+
+
+```{r}
+#Permutation test, correlation matrix
+#Function to get permutation test p-values for correlation
+
+#The option below prevents R from using scientific notation!
+options(scipen = 999)
+
+permCor <- function(x, y, n_samp = 10000, plotit = T){
+   corResults <- rep(NA, n_samp)
+   for (i in 1:n_samp){
+      corResults[i] <- cor(x, sample(y))
+   }
+   
+   pval <- mean(abs(corResults) >= abs(cor(x, y)))
+   
+   if (plotit == T){
+      #Make histogram of permuted correlations
+      hist(corResults, col = "yellow", main = "", xlab = "Correlations", breaks = 30,
+           xlim = range(corResults,cor(x,y)))
+      mtext("Permuted Sample Correlations", cex = 1.2, line = 1)
+      mtext(paste0("Permuted P-value = ", round(pval, 4),", Calculated P-value = ", round(cor.test(x, y)$p.value, 4)), cex = 0.8, line = 0)
+      abline(v = cor(x, y), col = "blue", lwd = 3)
+      text(cor(x,y)*1.05, 0, paste("Actual Correlation =", round(cor(x, y), 2)), srt = 90, adj = 0)
+   }
+   if (plotit == F){
+      return(round(pval, 5))
+   }  
+}
+
+``` 
+
+```{r}
+permCor(
+  x = species_with_park$Acres,
+  y = as.numeric(as.factor(species_with_park$`Conservation Status`))
+)
+
+```
+
+```{r}
+permCor(
+  x = species_with_park$Acres,
+  y = species_with_park$Latitude
+)
+
+```
+
+The permutation tests conducted on various datasets reveal different relationships among variables within a dataset concerning species in parks. The test between park acres and conservation status also shows permuted correlations centered around zero, with both permuted and calculated p-values (0.2611 and 0.2498 respectively) above the typical significance threshold, indicating that any observed correlation is likely due to chance. In stark contrast, the test between park acres and latitude shows a tight clustering of permuted correlations around zero, with an actual correlation far outside this distribution. Both permuted and calculated p-values of 0 confirm a strong and statistically significant relationship, emphasizing that park size is significantly influenced by geographical factors like latitude, while conservation status and species categorization appear unrelated to the physical attributes of parks.
+
+```{r}
+species_counts <- species_with_park %>%
+  group_by(`Park Name`, Category, `Conservation Status`) %>%
+  summarise(
+    Total_Species = n(),  # Total number of species in the park
+    Mean_Acres = mean(Acres, na.rm = TRUE),  # Average size of park areas
+    Latitude = mean(Latitude, na.rm = TRUE),  # Average latitude of the park
+    Longitude = mean(Longitude, na.rm = TRUE)  # Average longitude of the park
+  )
+
+cor_test <- cor.test(species_counts$Total_Species, species_counts$Mean_Acres)
+cor_test
+```
+
+The results from the Pearson's product-moment correlation test, which examines the relationship between the total number of species in each park (Total_Species) and the average size of the park areas (Mean_Acres), indicate a very weak and statistically insignificant negative correlation (correlation coefficient = -0.0238741). The test yields a p-value of 0.5394, which is well above the commonly used significance threshold of 0.05. This high p-value suggests that there is no statistically significant linear relationship between the number of species in a park and the park's size under the conditions studied.
+
+The confidence interval for the correlation coefficient, ranging from -0.09983644 to 0.05236491, includes zero, further underscoring the lack of a significant relationship. This confidence interval suggests that if there is any true correlation between these variables in the broader population, it could be slightly negative, negligible, or slightly positive, but it is unlikely to be strong or meaningful.
+
+
+```{r}
+reg_model <- lm(Total_Species ~ Mean_Acres + Latitude + Longitude, data = species_counts)
+summary(reg_model)
+```
+
+We used the linear regression analysis to predict the total number of species based on park area, latitude, and longitude, but found that these predictors are not statistically significant, as indicated by high p-values and minimal effect sizes. The model's low R-squared value (0.003375) and insignificant F-statistic (p-value 0.5262) further suggest a poor overall fit, indicating that these variables alone do not adequately explain variations in species counts across parks. This analysis highlights the need for additional factors or alternative modeling techniques to better capture the complexities influencing biodiversity in parks.
+
+```{r}
+# Convert categorical variables to factors
+species_counts$`Park Name` <- as.factor(species_counts$`Park Name`)
+species_counts$Category <- as.factor(species_counts$Category)
+species_counts$`Conservation Status` <- as.factor(species_counts$`Conservation Status`)
+
+# Fit the GLM model
+glm_model <- glm(Total_Species ~ Mean_Acres + Latitude + Longitude + `Park Name` + Category + `Conservation Status`, 
+                 family = poisson(), data = species_counts)
+
+# Summary of the GLM model
+summary(glm_model)
+myResPlots2(glm_model)
+```
+
+The Generalized Linear Model (GLM) using a Poisson distribution was fitted to predict the total species count based on multiple predictors including park acres, geographical coordinates, park name, category, and conservation status. The model's coefficients suggest that most individual parks and categories did not significantly affect the species count, with a few exceptions. Specifically, categories like Birds, Insects, Invertebrates, Mammals, and Vascular Plants have significant positive coefficients, indicating a higher species count in these categories.
+
+The overall model fit, evaluated through the AIC and the residual deviance, suggests an improved fit compared to the null model but still indicates substantial unexplained variance. The residual deviance (1670.1 on 586 degrees of freedom) points to overdispersion, which is common in count data models like Poisson, where the variance exceeds the mean.
+
+Residual plots, particularly the QQ plot of the studentized residuals, show some deviations from normality with outliers and potential influential points, which could be affecting model accuracy and assumptions. The plot of fitted values vs. standardized residuals indicates potential issues with homoscedasticity, as the spread of residuals varies across the range of fitted values.
+
+
+```{r}
+species_counts$Category <- as.factor(species_counts$Category)
+species_counts$`Conservation Status` <- as.factor(species_counts$`Conservation Status`)
+
+# Fit the two-way ANOVA model without the interaction term
+anova_model <- aov(Total_Species ~ Category + `Conservation Status`, data = species_counts)
+summary(anova_model)
+
+library(car)
+Anova(anova_model, type = "III")
+```
+
+The two-way ANOVA analysis for species counts in relation to species category and conservation status reveals statistically significant effects for both factors. The ANOVA results show that both category (F = 11.78, p < 0.0001) and conservation status (F = 36.80, p < 0.0001) have strong influences on the total number of species, indicating that different categories and conservation statuses are associated with different species counts.
+
+```{r}
+leveneTest(Total_Species ~ Category * `Conservation Status`, data = species_counts)
+```
+
+
+```{r}
+kruskal.test(Total_Species ~ interaction(Category, `Conservation Status`), data = species_counts)
+```
+
+Levene's test evaluates whether the variance in species counts is consistent across groups formed by combinations of category and conservation status. The highly significant result (F = 7.1154, p < 0.0001) indicates that variances are not homogeneous. This violation of ANOVA's assumption of equal variances suggests that the differences in variance across groups could affect the reliability of the ANOVA results. It implies that the data may benefit from transformations or the use of robust statistical methods that do not assume equal variances.
+
+The Kruskal-Wallis test, a non-parametric alternative to ANOVA, checks for differences in the median values among the groups. The significant result (chi-squared = 384.35, p < 0.0001) corroborates the ANOVA findings by confirming that there are significant differences between groups. However, unlike ANOVA, this test does not assume a normal distribution of residuals or equal variances, suggesting its conclusions about group differences are more robust under the violation of these assumptions.
+
+While the two-way ANOVA also identified significant effects of category and conservation status on species counts, it assumes normality and homogeneity of variances, both of which appear violated based on the diagnostic plots and Levene's test. The Kruskal-Wallis test's agreement with ANOVA in finding significant differences, despite not assuming normality, lends further credibility to the conclusion that these factors affect species counts. However, the violation of ANOVA's assumptions suggests that the F-values and p-values from ANOVA might not be fully reliable, and the significant results from Kruskal-Wallis offer a more dependable alternative for understanding the impact of category and conservation status on species variability.
+
+
+### **6)  Summary and Conclusion**
+
+In this project, we employed various statistical analyses and visualizations to investigate the relationships between park attributes and species data. Initial analyses, including linear regression and Pearson correlation, evaluated the impact of variables like park size, latitude, and longitude on species counts. These methods showed weak and statistically insignificant relationships for most predictors, leading us to utilize more robust techniques such as bootstrapping and permutation tests. These additional tests reinforced the significant influence of geographical factors on park size, though they showed limited effects on biodiversity metrics. Further exploration was conducted through ANOVA and GLM models, which examined the effects of species category and conservation status on species counts. Significant findings were indicated for both factors, suggesting that species diversity is affected by both biological classification and conservation status. However, diagnostic checks, including Levene's test and Kruskal-Wallis tests, highlighted issues with the assumption of homogeneity of variances and normal distribution of residuals, thus questioning the reliability of the ANOVA results. These analyses underscored the complexity of ecological data and the need for careful consideration of model assumptions and data characteristics in environmental and conservation studies.
